@@ -7238,6 +7238,10 @@ public final class MainActivity extends Activity {
      * to third-party apps — {@code startActivity} on them throws and the icon
      * appears dead. Raise the existing task instead (same path as freeform popups),
      * then fall back to any exported launcher entry the stack happens to ship.
+     *
+     * <p>CarPlay with a linked phone is the exception: raising its task never asks
+     * for the screen, so the service finishes the activity 1.5 s later. Ask the
+     * service instead, and it starts the activity itself.
      */
     private void launchProjection(ProjectionPresence.Kind kind) {
         onAppLaunched();
@@ -7245,6 +7249,12 @@ public final class MainActivity extends Activity {
         if (projectionPresence == null) return;
         if (pinBoundsRunnable != null) mainHandler.removeCallbacks(pinBoundsRunnable);
         if (pinMediaBoundsRunnable != null) mainHandler.removeCallbacks(pinMediaBoundsRunnable);
+
+        if (kind == ProjectionPresence.Kind.CARPLAY && projectionPresence.requestCarPlayUi()) {
+            clearPendingProjection();
+            notifyViewerShellLayout();
+            return;
+        }
 
         for (String pkg : ProjectionPresence.displayPackagesFor(kind)) {
             int taskId = findTaskIdForPackage(pkg);
