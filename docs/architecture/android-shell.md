@@ -267,6 +267,23 @@ should perform its normal safety/interlock checks, then publish the resulting
 status through the usual telemetry path; that telemetry is the authoritative
 state for the renderer.
 
+### Opening CarPlay (viewer → CarPlay service)
+
+`CarPlayDisplayActivity` is not exported, and it calls `requestUi` only from
+`onCreate` and `onNewIntent`. Raising its old task with `moveTaskToFront` triggers
+neither, so the phone is never asked for the screen. 1.5 s later the service sees
+that projection has not started and the activity finishes: the tap opens CarPlay
+and bounces back to the launcher. With no task left there was nothing to raise and
+nothing could be started.
+
+With a phone linked, `ProjectionPresence.requestCarPlayUi` sends `requestUi`
+directly: `ICarPlayService` transaction 20 with a single int `0`, one-way, over the
+binder the link poll already holds. It has no permission check, and the service
+starts the activity itself. The link state comes from the last poll, because a tap
+runs on the main thread. Without a linked phone, or if the send fails, the tap takes
+the usual raise and resolve path. Confirmed on the car with the same transaction
+patched into 1.0.2. `test-carplay-launch.mjs`.
+
 ### Freeform task ids (keeping popups on top)
 
 The MMI is Android 9, where freeform windows are ordinary stacks in one z-list:

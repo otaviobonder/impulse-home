@@ -44,8 +44,10 @@ final class ProjectionPresence {
     private static final String CP_HOST = "com.ts.carplay";
     private static final String CP_SERVICE_CLASS = "com.ts.carplay.CarPlayService";
     private static final String CP_DESCRIPTOR = "com.ts.carplay.common.aidl.ICarPlayService";
+    private static final int CP_TX_REQUEST_UI = 20;
     private static final int CP_TX_GET_LINK_STATUS = 29;
     private static final int CP_LINK_ACTIVATED = 2;
+    private static final int CP_UI_MODE_NORMAL = 0;
 
     private static final long POLL_MS = 2000;
 
@@ -58,6 +60,7 @@ final class ProjectionPresence {
     private ServiceConnection cpConnection;
     private volatile IBinder aaBinder;
     private volatile IBinder cpBinder;
+    private volatile boolean cpLinked;
     private volatile Kind lastKind = Kind.NONE;
     private boolean started;
 
@@ -102,6 +105,7 @@ final class ProjectionPresence {
         cpConnection = null;
         aaBinder = null;
         cpBinder = null;
+        cpLinked = false;
     }
 
     Kind current() {
@@ -242,8 +246,38 @@ final class ProjectionPresence {
         } else if (kind == Kind.CARPLAY) {
             // Nothing to send: ICarPlayService 30 is getVideoLastUserMode and 31
             // setSongElapsedTime (it could rewind the song). The only show-type
-            // call, requestUi (0x14), takes arguments we do not know, so the
-            // task resolve + launch intents in MainActivity do the showing.
+            // call, requestUi (0x14), is requestCarPlayUi, which has already run
+            // by the time a tap gets here, so the task resolve + launch intents
+            // in MainActivity do the showing.
+        }
+    }
+
+    /**
+     * Ask the CarPlay service for the screen. The phone hands it over and the
+     * service starts {@code CarPlayDisplayActivity} itself, with or without an
+     * old task to raise.
+     *
+     * <p>This runs on the main thread, so it uses the link state from the last
+     * poll and sends one-way: a tap never waits on the service.
+     *
+     * @return false when nothing was sent, so the caller can try the task path
+     */
+    boolean requestCarPlayUi() {
+        if (!cpLinked) return false;
+        IBinder binder = cpBinder;
+        if (binder == null || !binder.isBinderAlive()) return false;
+        Parcel data = Parcel.obtain();
+        try {
+            data.writeInterfaceToken(CP_DESCRIPTOR);
+            data.writeInt(CP_UI_MODE_NORMAL);
+            boolean sent = binder.transact(CP_TX_REQUEST_UI, data, null, IBinder.FLAG_ONEWAY);
+            Log.w(TAG, "Projection CARPLAY: requestUi sent=" + sent);
+            return sent;
+        } catch (Throwable t) {
+            Log.w(TAG, "Projection CARPLAY: requestUi failed", t);
+            return false;
+        } finally {
+            data.recycle();
         }
     }
 
@@ -287,7 +321,9 @@ final class ProjectionPresence {
     private boolean carPlayLinked() {
         IBinder binder = ensureCpBinder();
         Integer status = readInt(binder, CP_DESCRIPTOR, CP_TX_GET_LINK_STATUS);
-        return status != null && status == CP_LINK_ACTIVATED;
+        boolean linked = status != null && status == CP_LINK_ACTIVATED;
+        cpLinked = linked;
+        return linked;
     }
 
     private IBinder ensureAaBinder() {
